@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>茨城県 雨雲ナウキャスト & 7日間天気予報</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --panel: #ffffff;
+    --border: #d9dde2;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --rain: #60a5fa;
+    --warn: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  header {
+    background: #0f172a;
+    color: #fff;
+    padding: 10px 16px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .meta { font-size: 12px; color: #94a3b8; }
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(360px, 1fr);
+    gap: 8px;
+    padding: 8px;
+    min-height: 0;
+  }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .map-wrap { position: relative; flex: 1; min-height: 0; }
+  #map { position: absolute; inset: 0; }
+  .controls {
+    border-top: 1px solid var(--border);
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fafbfc;
+    flex-wrap: wrap;
+  }
+  .controls button {
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    border-radius: 4px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .controls button.secondary {
+    background: #e5e7eb;
+    color: #111827;
+  }
+  .controls input[type=range] { flex: 1; min-width: 160px; }
+  .controls .time-label {
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--muted);
+    min-width: 130px;
+  }
+  .controls .badge {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: #e0e7ff;
+    color: #3730a3;
+  }
+  .controls .badge.fcst { background: #fee2e2; color: #991b1b; }
+
+  .loc-buttons {
+    position: absolute;
+    top: 10px;
+    left: 50px;
+    z-index: 500;
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .loc-buttons button {
+    background: rgba(255,255,255,0.95);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  }
+  .loc-buttons button:hover { background: #f3f4f6; }
+  .loc-buttons button.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .loc-buttons button.all {
+    background: #e5e7eb;
+  }
+
+  .legend {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(255,255,255,0.92);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    z-index: 500;
+  }
+  .legend .row { display: flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 10px; display: inline-block; border-radius: 2px; }
+
+  .forecast-panel { padding: 0; }
+  .forecast-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .forecast-header h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .forecast-header .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  .temp-chart-section {
+    padding: 8px 12px 10px;
+    border-bottom: 1px solid var(--border);
+    background: #fafbfc;
+  }
+  .temp-chart-title {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .temp-chart-title .now {
+    color: #dc2626;
+    font-weight: 600;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .temp-chart-svg { width: 100%; height: 140px; display: block; }
+  .temp-chart-empty {
+    font-size: 12px;
+    color: var(--muted);
+    padding: 12px 0;
+    text-align: center;
+  }
+  .area-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px 0;
+    flex-wrap: wrap;
+  }
+  .area-tabs button {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .area-tabs button.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .forecast-list {
+    overflow-y: auto;
+    padding: 8px 8px 12px;
+  }
+  .day {
+    display: grid;
+    grid-template-columns: 70px 56px 1fr 110px;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 8px;
+    border-bottom: 1px solid #eef0f3;
+  }
+  .day:last-child { border-bottom: none; }
+  .day .date { font-size: 12px; line-height: 1.3; }
+  .day .date .d { font-size: 14px; font-weight: 600; }
+  .day .date .wd { color: var(--muted); }
+  .day .date .wd.sat { color: #2563eb; }
+  .day .date .wd.sun { color: #dc2626; }
+  .day .icon { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .day .icon img { width: 40px; height: 40px; }
+  .day .icon .telop { font-size: 10px; color: var(--muted); text-align: center; }
+  .day .info { font-size: 12px; }
+  .day .info .pop { color: #1d4ed8; font-weight: 600; }
+  .day .info .text { color: var(--muted); margin-top: 2px; line-height: 1.4; }
+  .day .temps { font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+  .day .temps .max { color: #dc2626; font-weight: 600; }
+  .day .temps .min { color: #2563eb; font-weight: 600; }
+  .day .temps .range { color: var(--muted); font-size: 11px; }
+
+  .pop-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2px;
+    margin-top: 4px;
+    font-size: 10px;
+    text-align: center;
+  }
+  .pop-row .cell {
+    background: #f3f4f6;
+    border-radius: 3px;
+    padding: 2px 0;
+  }
+  .pop-row .cell .t { color: var(--muted); }
+  .pop-row .cell .v { font-weight: 600; }
+
+  .loading, .error {
+    padding: 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .error { color: var(--warn); }
+
+  footer {
+    text-align: center;
+    font-size: 11px;
+    color: var(--muted);
+    padding: 6px;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="header-title">雨雲ナウキャスト &amp; 7日間天気予報</h1>
+  <span class="meta" id="header-meta">読み込み中…</span>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div class="loc-buttons" id="loc-buttons"></div>
+      <div class="legend">
+        <div style="font-weight:600;margin-bottom:4px;">降水強度 (mm/h)</div>
+        <div class="row"><span class="sw" style="background:#f2f2ff"></span>0.1–1</div>
+        <div class="row"><span class="sw" style="background:#a0d2ff"></span>1–5</div>
+        <div class="row"><span class="sw" style="background:#0096ff"></span>5–10</div>
+        <div class="row"><span class="sw" style="background:#faf500"></span>10–20</div>
+        <div class="row"><span class="sw" style="background:#ff9900"></span>20–30</div>
+        <div class="row"><span class="sw" style="background:#ff2800"></span>30–50</div>
+        <div class="row"><span class="sw" style="background:#b40068"></span>50–80</div>
+        <div class="row"><span class="sw" style="background:#410069"></span>80+</div>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="play-btn">▶ 再生</button>
+      <input id="time-slider" type="range" min="0" max="0" value="0" />
+      <span class="time-label" id="time-label">--:--</span>
+      <span class="badge" id="time-badge">実況</span>
+      <button class="secondary" id="reload-btn" title="最新時刻に更新">↻</button>
+    </div>
+  </section>
+
+  <aside class="panel forecast-panel">
+    <div class="forecast-header">
+      <h2 id="forecast-title">茨城県の天気予報（7日先まで）</h2>
+      <div class="sub" id="forecast-meta">水戸地方気象台</div>
+    </div>
+    <div class="temp-chart-section">
+      <div class="temp-chart-title">
+        <span id="temp-chart-label">今日の気温</span>
+        <span class="now" id="temp-chart-now">--°</span>
+      </div>
+      <div id="temp-chart"><div class="temp-chart-empty">読み込み中…</div></div>
+    </div>
+    <div class="area-tabs" id="area-tabs"></div>
+    <div class="forecast-list" id="forecast-list">
+      <div class="loading">予報データを読み込み中…</div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  出典: 気象庁 (Japan Meteorological Agency) — タイル画像と予報データは
+  <a href="https://www.jma.go.jp/" target="_blank" rel="noopener">jma.go.jp</a> より取得しています。
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+/* =========================================================================
+   1. Leaflet 地図 + 国土地理院ベース + JMA 雨雲ナウキャスト
+   ========================================================================= */
+
+// 表示地点 — JMA 予報の office コード／一次細分名／週間気温観測点 とリンク
+const LOCATIONS = [
+  { name: 'つくば', lat: 36.075534, lon: 140.092506, zoom: 13, note: '茨城県つくば市',
+    office: '080000', prefName: '茨城県', subAreaMatch: '南部',     tempPointMatch: '水戸' },
+  { name: '柳津',   lat: 37.511700, lon: 139.715800, zoom: 13, note: '福島県河沼郡柳津町',
+    office: '070000', prefName: '福島県', subAreaMatch: '会津',     tempPointMatch: '若松' },
+  { name: '姫路',   lat: 34.815300, lon: 134.685400, zoom: 13, note: '兵庫県姫路市（姫路城周辺）',
+    office: '280000', prefName: '兵庫県', subAreaMatch: '播磨南西部', tempPointMatch: '姫路' },
+  { name: '名古屋', lat: 35.181400, lon: 136.906500, zoom: 13, note: '愛知県名古屋市（名古屋駅周辺）',
+    office: '230000', prefName: '愛知県', subAreaMatch: '西部',     tempPointMatch: '名古屋' },
+];
+
+let currentLocation = LOCATIONS[0]; // デフォルト=つくば
+
+const map = L.map('map', { zoomControl: true, preferCanvas: true });
+
+// 国土地理院 淡色地図（ベース）
+L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+  attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>',
+  maxZoom: 18,
+}).addTo(map);
+
+// マーカー設置 + 地点ジャンプボタン（地図 ↔ 予報を連動）
+const $locButtons = document.getElementById('loc-buttons');
+const locButtonRefs = {};
+const markers = {};
+LOCATIONS.forEach(loc => {
+  const m = L.marker([loc.lat, loc.lon]).addTo(map)
+    .bindPopup(`<b>${loc.name}</b><br>${loc.note}<br>lat ${loc.lat}, lon ${loc.lon}`);
+  markers[loc.name] = m;
+
+  const b = document.createElement('button');
+  b.textContent = loc.name;
+  b.addEventListener('click', () => selectLocation(loc));
+  m.on('click', () => selectLocation(loc));
+  $locButtons.appendChild(b);
+  locButtonRefs[loc.name] = b;
+});
+
+function selectLocation(loc) {
+  currentLocation = loc;
+  map.flyTo([loc.lat, loc.lon], loc.zoom, { duration: 0.6 });
+  markers[loc.name].openPopup();
+  Object.values(locButtonRefs).forEach(btn => btn.classList.remove('active'));
+  locButtonRefs[loc.name].classList.add('active');
+  document.getElementById('header-title').textContent =
+    `${loc.name}（${loc.prefName}） 雨雲ナウキャスト & 7日間天気予報`;
+  loadForecast(loc).catch(err => console.error(err));
+  loadTempChart(loc).catch(err => console.error(err));
+}
+
+// デフォルト = つくば
+map.setView([currentLocation.lat, currentLocation.lon], currentLocation.zoom);
+locButtonRefs[currentLocation.name].classList.add('active');
+document.getElementById('header-title').textContent =
+  `${currentLocation.name}（${currentLocation.prefName}） 雨雲ナウキャスト & 7日間天気予報`;
+
+// JMA ナウキャストのタイルレイヤ管理
+let nowcastLayer = null;
+let frames = [];      // [{basetime, validtime, isForecast}]
+let frameIdx = 0;
+let playing = false;
+let playTimer = null;
+
+const $slider = document.getElementById('time-slider');
+const $label = document.getElementById('time-label');
+const $badge = document.getElementById('time-badge');
+const $play = document.getElementById('play-btn');
+const $headerMeta = document.getElementById('header-meta');
+
+function fmtTime(s) {
+  // s は "YYYYMMDDHHMM" 形式（UTC）。JST に直して表示
+  const d = new Date(Date.UTC(
+    +s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8),
+    +s.slice(8,10), +s.slice(10,12)
+  ));
+  const jst = new Date(d.getTime()); // toLocaleString で JST 指定
+  return jst.toLocaleString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+async function loadNowcastTimes() {
+  // N1 = 実況 (高解像度降水ナウキャスト), N2 = 予報
+  const [n1, n2] = await Promise.all([
+    fetch('https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json').then(r => r.json()),
+    fetch('https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json').then(r => r.json()),
+  ]);
+
+  // N1: 過去 1 時間（5 分刻み）。古い→新しい 順に並べる
+  const past = n1
+    .map(x => ({ basetime: x.basetime, validtime: x.validtime, isForecast: false }))
+    .sort((a, b) => a.validtime.localeCompare(b.validtime));
+
+  // N2: 1 時間先までの予報。最新 basetime のものを採用
+  const latestBasetime = n2.reduce((m, x) => x.basetime > m ? x.basetime : m, '');
+  const future = n2
+    .filter(x => x.basetime === latestBasetime && x.validtime > x.basetime)
+    .map(x => ({ basetime: x.basetime, validtime: x.validtime, isForecast: true }))
+    .sort((a, b) => a.validtime.localeCompare(b.validtime));
+
+  frames = [...past, ...future];
+  // 既定は最新の実況フレーム（過去の末尾）
+  frameIdx = past.length > 0 ? past.length - 1 : 0;
+
+  $slider.max = frames.length - 1;
+  $slider.value = frameIdx;
+  renderFrame();
+
+  const updated = past[past.length - 1];
+  $headerMeta.textContent = '雨雲: ' + (updated ? fmtTime(updated.validtime) + ' 時点' : '取得失敗');
+}
+
+function nowcastTileUrl(basetime, validtime) {
+  // hrpns = 高解像度降水ナウキャスト
+  return `https://www.jma.go.jp/bosai/jmatile/data/nowc/${basetime}/none/${validtime}/surf/hrpns/{z}/{x}/{y}.png`;
+}
+
+function renderFrame() {
+  const f = frames[frameIdx];
+  if (!f) return;
+  if (nowcastLayer) map.removeLayer(nowcastLayer);
+  nowcastLayer = L.tileLayer(nowcastTileUrl(f.basetime, f.validtime), {
+    opacity: 0.7,
+    maxNativeZoom: 10,
+    maxZoom: 18,
+    attribution: '降水: 気象庁',
+  }).addTo(map);
+
+  $label.textContent = fmtTime(f.validtime);
+  $badge.textContent = f.isForecast ? '予報' : '実況';
+  $badge.classList.toggle('fcst', f.isForecast);
+  $slider.value = frameIdx;
+}
+
+$slider.addEventListener('input', () => {
+  frameIdx = +$slider.value;
+  renderFrame();
+});
+
+$play.addEventListener('click', () => {
+  playing = !playing;
+  $play.textContent = playing ? '❚❚ 停止' : '▶ 再生';
+  if (playing) {
+    playTimer = setInterval(() => {
+      frameIdx = (frameIdx + 1) % frames.length;
+      renderFrame();
+    }, 500);
+  } else {
+    clearInterval(playTimer);
+  }
+});
+
+document.getElementById('reload-btn').addEventListener('click', () => {
+  loadNowcastTimes().catch(err => console.error(err));
+  loadForecast(currentLocation).catch(err => console.error(err));
+  loadTempChart(currentLocation).catch(err => console.error(err));
+});
+
+/* =========================================================================
+   2. 7 日間天気予報（地点に連動）
+   ========================================================================= */
+
+// JMA の天気コード→アイコン/天気名 マッピング (telops.json と同等の抜粋)
+// フル取得は const/telops.json から行うので、フェッチ失敗時のフォールバック用
+const TELOPS_FALLBACK = {
+  "100": ["100.svg", "500.svg", "晴", "CLEAR"],
+  "101": ["101.svg", "501.svg", "晴時々曇", "PARTLY CLOUDY"],
+  "102": ["102.svg", "502.svg", "晴一時雨", "CLEAR, OCCASIONAL SCATTERED SHOWERS"],
+  "200": ["200.svg", "200.svg", "曇", "CLOUDY"],
+  "201": ["201.svg", "501.svg", "曇時々晴", "MOSTLY CLOUDY"],
+  "202": ["202.svg", "202.svg", "曇一時雨", "CLOUDY, OCCASIONAL SCATTERED SHOWERS"],
+  "300": ["300.svg", "300.svg", "雨", "RAIN"],
+  "301": ["301.svg", "501.svg", "雨時々晴", "RAIN, PARTLY CLOUDY"],
+  "302": ["302.svg", "302.svg", "雨時々止む", "SHOWERS THROUGHOUT THE DAY"],
+  "400": ["400.svg", "400.svg", "雪", "SNOW"],
+};
+
+let TELOPS = TELOPS_FALLBACK;
+fetch('https://www.jma.go.jp/bosai/forecast/const/telops.json')
+  .then(r => r.json())
+  .then(j => { TELOPS = j; })
+  .catch(() => { /* フォールバック使用 */ });
+
+function telopIcon(code, isNight=false) {
+  const t = TELOPS[code];
+  if (!t) return null;
+  const file = isNight ? t[1] : t[0];
+  return 'https://www.jma.go.jp/bosai/forecast/img/' + file;
+}
+function telopText(code) {
+  const t = TELOPS[code];
+  return t ? t[2] : '';
+}
+
+const WEEKDAYS = ['日','月','火','水','木','金','土'];
+
+function parseISOToJST(iso) {
+  return new Date(iso); // ISO 文字列は TZ 付きでパース可
+}
+
+// JST の日付 (yyyy-mm-dd) を取り出す
+function jstDateKey(d) {
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Tokyo' });
+}
+
+async function loadForecast(location) {
+  const loc = location || currentLocation;
+  const $list = document.getElementById('forecast-list');
+  const $tabs = document.getElementById('area-tabs');
+  const $meta = document.getElementById('forecast-meta');
+  const $title = document.getElementById('forecast-title');
+  $title.textContent = `${loc.prefName}の天気予報（7日先まで）`;
+  $list.innerHTML = '<div class="loading">予報データを読み込み中…</div>';
+  $tabs.innerHTML = '';
+
+  let data;
+  try {
+    data = await fetch(
+      `https://www.jma.go.jp/bosai/forecast/data/forecast/${loc.office}.json`
+    ).then(r => r.json());
+  } catch (e) {
+    $list.innerHTML = '<div class="error">予報データの取得に失敗しました。<br>' + e.message + '</div>';
+    return;
+  }
+
+  // 別地点に切り替わっていたら破棄
+  if (loc !== currentLocation) return;
+
+  const short = data[0]; // 3 日予報
+  const weekly = data[1]; // 週間予報
+
+  $meta.textContent = `${short.publishingOffice} / 発表 ${parseISOToJST(short.reportDatetime).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`;
+
+  // 一次細分一覧。weatherCodes が入っている timeSeries[0] を使う
+  const weatherTS = short.timeSeries[0];
+  const popTS = short.timeSeries[1];   // 6 時間ごとの降水確率
+  const tempTS = short.timeSeries[2];  // 朝/昼の最低/最高気温（観測点別）
+
+  const subAreas = weatherTS.areas.map(a => ({ code: a.area.code, name: a.area.name }));
+
+  // 週間予報のエリア（県内代表観測点）
+  const weeklyWeatherTS = weekly.timeSeries[0];
+  const weeklyTempTS = weekly.timeSeries[1];
+
+  // 地点に対応する細分インデックスを決定（部分一致 → 見つからなければ 0）
+  const matchedIdx = subAreas.findIndex(a => a.name.includes(loc.subAreaMatch));
+  let currentSubIdx = matchedIdx >= 0 ? matchedIdx : 0;
+
+  // タブ生成（細分） — 地点に応じて初期 active を変更
+  subAreas.forEach((sa, i) => {
+    const b = document.createElement('button');
+    b.textContent = sa.name;
+    if (i === currentSubIdx) b.classList.add('active');
+    b.addEventListener('click', () => {
+      currentSubIdx = i;
+      [...$tabs.children].forEach(c => c.classList.remove('active'));
+      b.classList.add('active');
+      render();
+    });
+    $tabs.appendChild(b);
+  });
+
+  // 短期気温観測点も部分一致で選ぶ
+  const tempAreaIdx = tempTS && tempTS.areas
+    ? Math.max(0, tempTS.areas.findIndex(a => a.area.name.includes(loc.tempPointMatch)))
+    : 0;
+
+  function render() {
+    const sub = subAreas[currentSubIdx];
+
+    // 短期：その細分のデータ
+    const wArea = weatherTS.areas[currentSubIdx];
+    const pArea = popTS.areas[currentSubIdx];
+
+    // 週間：県の代表観測点は最初のエントリを使うのが基本だが、tempPointMatch で観測点別気温を選ぶ
+    const wWeekly = weeklyWeatherTS.areas[0];
+    const weeklyTempIdx = Math.max(0, weeklyTempTS.areas.findIndex(a => a.area.name.includes(loc.tempPointMatch)));
+    const tempArea = weeklyTempTS.areas[weeklyTempIdx];
+
+    // 日ごとに統合
+    // 短期: weatherTS.timeDefines = ["2026-05-09T05:00:00+09:00","2026-05-10T00:00:00+09:00",...]
+    const days = []; // {dateKey, dateObj, weatherCode, weatherText, pops:[{t,v}], tMax, tMin, reliability}
+    const dayMap = new Map();
+
+    function getOrCreate(dateKey, dateObj) {
+      if (!dayMap.has(dateKey)) {
+        const o = { dateKey, dateObj, pops: [] };
+        dayMap.set(dateKey, o);
+        days.push(o);
+      }
+      return dayMap.get(dateKey);
+    }
+
+    // 短期: 天気
+    weatherTS.timeDefines.forEach((td, i) => {
+      const d = parseISOToJST(td);
+      const key = jstDateKey(d);
+      const o = getOrCreate(key, d);
+      if (o.weatherCode == null) {
+        o.weatherCode = wArea.weatherCodes[i];
+        o.weatherText = wArea.weathers ? wArea.weathers[i] : '';
+        o.windText = wArea.winds ? wArea.winds[i] : '';
+      }
+    });
+
+    // 短期: 降水確率（6 時間ごと）
+    popTS.timeDefines.forEach((td, i) => {
+      const d = parseISOToJST(td);
+      const key = jstDateKey(d);
+      const o = dayMap.get(key);
+      if (!o) return;
+      const hour = +d.toLocaleString('en-US', { timeZone: 'Asia/Tokyo', hour: '2-digit', hour12: false });
+      const labels = { 0: '0–6', 6: '6–12', 12: '12–18', 18: '18–24' };
+      o.pops.push({ t: labels[hour] || `${hour}–`, v: pArea.pops[i] });
+    });
+
+    // 短期: 気温
+    if (tempTS && tempTS.areas && tempTS.areas[tempAreaIdx]) {
+      const tArea = tempTS.areas[tempAreaIdx];
+      tempTS.timeDefines.forEach((td, i) => {
+        const d = parseISOToJST(td);
+        const key = jstDateKey(d);
+        const o = dayMap.get(key);
+        if (!o) return;
+        const hour = +d.toLocaleString('en-US', { timeZone: 'Asia/Tokyo', hour: '2-digit', hour12: false });
+        const v = tArea.temps[i];
+        if (v === '' || v == null) return;
+        // 朝(0時 or 9時)≈最低, 昼(15時前後)≈最高
+        if (hour < 12) o.tMin = +v;
+        else o.tMax = +v;
+      });
+    }
+
+    // 週間: 天気・降水確率・信頼度
+    weeklyWeatherTS.timeDefines.forEach((td, i) => {
+      const d = parseISOToJST(td);
+      const key = jstDateKey(d);
+      const o = getOrCreate(key, d);
+      if (o.weatherCode == null) o.weatherCode = wWeekly.weatherCodes[i];
+      if (wWeekly.pops && wWeekly.pops[i] !== '' && o.pops.length === 0) {
+        o.dailyPop = wWeekly.pops[i];
+      }
+      if (wWeekly.reliabilities) o.reliability = wWeekly.reliabilities[i];
+    });
+
+    // 週間: 気温
+    weeklyTempTS.timeDefines.forEach((td, i) => {
+      const d = parseISOToJST(td);
+      const key = jstDateKey(d);
+      const o = dayMap.get(key);
+      if (!o) return;
+      const min = tempArea.tempsMin[i], max = tempArea.tempsMax[i];
+      if (o.tMin == null && min !== '') o.tMin = +min;
+      if (o.tMax == null && max !== '') o.tMax = +max;
+      o.tMinUpper = tempArea.tempsMinUpper && tempArea.tempsMinUpper[i];
+      o.tMinLower = tempArea.tempsMinLower && tempArea.tempsMinLower[i];
+      o.tMaxUpper = tempArea.tempsMaxUpper && tempArea.tempsMaxUpper[i];
+      o.tMaxLower = tempArea.tempsMaxLower && tempArea.tempsMaxLower[i];
+    });
+
+    // 並べ替えて 7 日分に切る
+    days.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+    const display = days.slice(0, 7);
+
+    // 描画
+    $list.innerHTML = '';
+    display.forEach(o => {
+      const row = document.createElement('div');
+      row.className = 'day';
+
+      // 日付
+      const wd = o.dateObj.getDay();
+      const wdCls = wd === 0 ? 'sun' : wd === 6 ? 'sat' : '';
+      const mm = o.dateObj.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric' });
+      const dd = o.dateObj.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', day: 'numeric' });
+      row.innerHTML = `
+        <div class="date">
+          <div class="d">${mm}/${dd}</div>
+          <div class="wd ${wdCls}">(${WEEKDAYS[wd]})</div>
+        </div>
+      `;
+
+      // アイコン
+      const iconWrap = document.createElement('div');
+      iconWrap.className = 'icon';
+      const iconUrl = telopIcon(o.weatherCode);
+      if (iconUrl) {
+        const img = document.createElement('img');
+        img.src = iconUrl;
+        img.alt = telopText(o.weatherCode);
+        iconWrap.appendChild(img);
+      }
+      const tel = document.createElement('div');
+      tel.className = 'telop';
+      tel.textContent = telopText(o.weatherCode);
+      iconWrap.appendChild(tel);
+      row.appendChild(iconWrap);
+
+      // 中段（テキスト + 降水確率行）
+      const info = document.createElement('div');
+      info.className = 'info';
+      if (o.weatherText) {
+        const t = document.createElement('div');
+        t.className = 'text';
+        t.textContent = o.weatherText.replace(/　/g, ' ');
+        info.appendChild(t);
+      }
+      if (o.pops && o.pops.length > 0) {
+        const popRow = document.createElement('div');
+        popRow.className = 'pop-row';
+        ['0–6','6–12','12–18','18–24'].forEach(lbl => {
+          const found = o.pops.find(p => p.t === lbl);
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.innerHTML = `<div class="t">${lbl}</div><div class="v">${found && found.v !== '' ? found.v + '%' : '—'}</div>`;
+          popRow.appendChild(cell);
+        });
+        info.appendChild(popRow);
+      } else if (o.dailyPop != null && o.dailyPop !== '') {
+        const p = document.createElement('div');
+        p.className = 'pop';
+        p.textContent = '降水確率 ' + o.dailyPop + '%';
+        info.appendChild(p);
+        if (o.reliability) {
+          const r = document.createElement('div');
+          r.className = 'text';
+          r.textContent = '信頼度 ' + o.reliability;
+          info.appendChild(r);
+        }
+      }
+      row.appendChild(info);
+
+      // 気温
+      const temps = document.createElement('div');
+      temps.className = 'temps';
+      const max = o.tMax != null ? `<span class="max">${o.tMax}°</span>` : '—';
+      const min = o.tMin != null ? `<span class="min">${o.tMin}°</span>` : '—';
+      temps.innerHTML = `${max} / ${min}`;
+      if (o.tMaxLower != null && o.tMaxLower !== '' && o.tMaxUpper != null && o.tMaxUpper !== '') {
+        const r = document.createElement('div');
+        r.className = 'range';
+        r.textContent = `(${o.tMaxLower}–${o.tMaxUpper})`;
+        temps.appendChild(r);
+      }
+      row.appendChild(temps);
+
+      $list.appendChild(row);
+    });
+  }
+
+  render();
+}
+
+/* =========================================================================
+   2.5  当日の気温推移（AMEDAS 10 分値）
+   ========================================================================= */
+
+let amedasTablePromise = null;
+function getAmedasTable() {
+  if (!amedasTablePromise) {
+    amedasTablePromise = fetch('https://www.jma.go.jp/bosai/amedas/const/amedastable.json')
+      .then(r => r.json());
+  }
+  return amedasTablePromise;
+}
+
+// lat/lon → 距離 (度の二乗、概算で十分)
+function nearestAmedasStation(table, lat, lon) {
+  let best = null, bestDist = Infinity;
+  for (const [code, s] of Object.entries(table)) {
+    if (!s.lat || !s.lon) continue;
+    // lat/lon は [度, 分] 形式
+    const sLat = s.lat[0] + s.lat[1] / 60;
+    const sLon = s.lon[0] + s.lon[1] / 60;
+    // 経度差を緯度に補正（cos）
+    const cosL = Math.cos(lat * Math.PI / 180);
+    const dx = (sLon - lon) * cosL;
+    const dy = sLat - lat;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist) { bestDist = d; best = { code, station: s }; }
+  }
+  return best;
+}
+
+function todayJSTymd() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Tokyo' }).replace(/-/g, '');
+}
+
+function parseAmedasTs(ts) {
+  // "YYYYMMDDhhmmss" (JST)
+  const hr = +ts.slice(8, 10), mi = +ts.slice(10, 12);
+  return { hour: hr + mi / 60, label: `${String(hr).padStart(2,'0')}:${String(mi).padStart(2,'0')}` };
+}
+
+async function loadTempChart(loc) {
+  const $chart = document.getElementById('temp-chart');
+  const $label = document.getElementById('temp-chart-label');
+  const $now   = document.getElementById('temp-chart-now');
+  $chart.innerHTML = '<div class="temp-chart-empty">読み込み中…</div>';
+  $now.textContent = '--°';
+
+  let table;
+  try { table = await getAmedasTable(); }
+  catch (e) {
+    $chart.innerHTML = '<div class="temp-chart-empty">アメダス観測点表の取得に失敗</div>';
+    return;
+  }
+  if (loc !== currentLocation) return;
+
+  // 気温観測のある最寄り観測点を探す（候補上位 5 から fetch して temp あり優先）
+  const candidates = [];
+  for (let n = 0; n < 5; n++) {
+    const best = nearestAmedasStation(table, loc.lat, loc.lon);
+    if (!best) break;
+    candidates.push(best);
+    delete table[best.code]; // 次の最近を探すため一時的に除外
+  }
+
+  const ymd = todayJSTymd();
+  const blocks = ['00','03','06','09','12','15','18','21'];
+
+  let chosen = null;
+  let points = [];
+  for (const cand of candidates) {
+    const settled = await Promise.allSettled(
+      blocks.map(h =>
+        fetch(`https://www.jma.go.jp/bosai/amedas/data/point/${cand.code}/${ymd}_${h}.json`)
+          .then(r => r.ok ? r.json() : null)
+      )
+    );
+    if (loc !== currentLocation) return;
+    const pts = [];
+    settled.forEach(r => {
+      if (r.status === 'fulfilled' && r.value) {
+        for (const [ts, d] of Object.entries(r.value)) {
+          if (d && d.temp && d.temp[0] != null && d.temp[0] !== '') {
+            const t = parseAmedasTs(ts);
+            pts.push({ hour: t.hour, label: t.label, temp: +d.temp[0] });
+          }
+        }
+      }
+    });
+    if (pts.length > 0) {
+      chosen = cand;
+      points = pts.sort((a, b) => a.hour - b.hour);
+      break;
+    }
+  }
+
+  if (!chosen || points.length === 0) {
+    $chart.innerHTML = '<div class="temp-chart-empty">本日の気温データを取得できませんでした</div>';
+    $label.textContent = '今日の気温';
+    return;
+  }
+
+  const stationName = chosen.station.kjName || chosen.code;
+  $label.textContent = `今日の気温（観測点: ${stationName}）`;
+  const last = points[points.length - 1];
+  $now.textContent = `${last.temp.toFixed(1)}° (${last.label})`;
+
+  renderTempChart($chart, points);
+}
+
+function renderTempChart(container, points) {
+  const W = 360, H = 140, padL = 30, padR = 14, padT = 10, padB = 22;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+
+  const temps = points.map(p => p.temp);
+  let minT = Math.min(...temps);
+  let maxT = Math.max(...temps);
+  minT = Math.floor(minT - 1);
+  maxT = Math.ceil(maxT + 1);
+  if (maxT - minT < 4) maxT = minT + 4;
+
+  const x = h => padL + (h / 24) * innerW;
+  const y = t => padT + (1 - (t - minT) / (maxT - minT)) * innerH;
+
+  const path = points.map((p, i) =>
+    (i === 0 ? 'M' : 'L') + x(p.hour).toFixed(1) + ',' + y(p.temp).toFixed(1)
+  ).join(' ');
+
+  // 塗り（折れ線下の薄い赤）
+  const fillPath = path
+    + ` L${x(points[points.length-1].hour).toFixed(1)},${(padT + innerH).toFixed(1)}`
+    + ` L${x(points[0].hour).toFixed(1)},${(padT + innerH).toFixed(1)} Z`;
+
+  // 軸目盛
+  const yStep = (maxT - minT) <= 10 ? 2 : 5;
+  const yTicks = [];
+  for (let t = Math.ceil(minT / yStep) * yStep; t <= maxT; t += yStep) yTicks.push(t);
+  const xTicks = [0, 6, 12, 18, 24];
+
+  const lastP = points[points.length - 1];
+
+  const svg = `
+    <svg viewBox="0 0 ${W} ${H}" class="temp-chart-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+      ${yTicks.map(t => `
+        <line x1="${padL}" y1="${y(t).toFixed(1)}" x2="${W - padR}" y2="${y(t).toFixed(1)}" stroke="#eef0f3" stroke-width="1"/>
+        <text x="${padL - 4}" y="${(y(t) + 3).toFixed(1)}" font-size="9" fill="#9ca3af" text-anchor="end">${t}°</text>
+      `).join('')}
+      ${xTicks.map(h => `
+        <line x1="${x(h).toFixed(1)}" y1="${padT}" x2="${x(h).toFixed(1)}" y2="${H - padB}" stroke="#eef0f3" stroke-width="1"/>
+        <text x="${x(h).toFixed(1)}" y="${H - padB + 12}" font-size="9" fill="#9ca3af" text-anchor="middle">${h}時</text>
+      `).join('')}
+      <path d="${fillPath}" fill="rgba(220,38,38,0.08)" stroke="none"/>
+      <path d="${path}" fill="none" stroke="#dc2626" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+      ${points.map(p => `<circle cx="${x(p.hour).toFixed(1)}" cy="${y(p.temp).toFixed(1)}" r="1.6" fill="#dc2626"><title>${p.label}  ${p.temp}°C</title></circle>`).join('')}
+      <circle cx="${x(lastP.hour).toFixed(1)}" cy="${y(lastP.temp).toFixed(1)}" r="3.2" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+    </svg>
+  `;
+  container.innerHTML = svg;
+}
+
+/* =========================================================================
+   3. 起動
+   ========================================================================= */
+
+loadNowcastTimes().catch(err => {
+  console.error(err);
+  $headerMeta.textContent = '雨雲データの取得に失敗しました';
+});
+loadForecast(currentLocation).catch(err => console.error(err));
+loadTempChart(currentLocation).catch(err => console.error(err));
+
+// 5 分ごとに自動更新（雨雲）/ 10 分ごと（気温）/ 30 分ごと（予報）— いずれも現在選択中の地点
+setInterval(() => loadNowcastTimes().catch(()=>{}), 5 * 60 * 1000);
+setInterval(() => loadTempChart(currentLocation).catch(()=>{}), 10 * 60 * 1000);
+setInterval(() => loadForecast(currentLocation).catch(()=>{}), 30 * 60 * 1000);
+</script>
+</body>
+</html>
